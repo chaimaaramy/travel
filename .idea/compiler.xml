@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CompilerConfiguration">
+    <annotationProcessing>
+      <profile name="Annotation profile for service-voyages" enabled="true">
+        <sourceOutputDir name="target/generated-sources/annotations" />
+        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
+        <outputRelativeToContentRoot value="true" />
+        <processorPath useClasspath="false">
+          <entry name="$MAVEN_REPOSITORY$/org/projectlombok/lombok/1.18.48/lombok-1.18.48.jar" />
+          <entry name="$MAVEN_REPOSITORY$/org/projectlombok/lombok/1.18.48/lombok-1.18.48.jar" />
+        </processorPath>
+        <module name="service-notification" />
+        <module name="service-reservations" />
+        <module name="onfig-server" />
+        <module name="service-voyages" />
+        <module name="service-paiements" />
+        <module name="service-avis" />
+        <module name="service-trajets" />
+        <module name="service-utilisateurs" />
+      </profile>
+    </annotationProcessing>
+    <bytecodeTargetLevel>
+      <module name="api-gateway" target="21" />
+      <module name="config-server" target="21" />
+      <module name="eureka-server" target="21" />
+    </bytecodeTargetLevel>
+  </component>
+  <component name="JavacSettings">
+    <option name="ADDITIONAL_OPTIONS_OVERRIDE">
+      <module name="api-gateway" options="-parameters" />
+      <module name="config-server" options="-parameters" />
+      <module name="eureka-server" options="-parameters" />
+      <module name="onfig-server" options="-parameters" />
+      <module name="service-avis" options="-parameters" />
+      <module name="service-notification" options="-parameters" />
+      <module name="service-paiements" options="-parameters" />
+      <module name="service-reservations" options="-parameters" />
+      <module name="service-trajets" options="-parameters" />
+      <module name="service-utilisateurs" options="-parameters" />
+      <module name="service-voyages" options="-parameters" />
+    </option>
+  </component>
+</project>

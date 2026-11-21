@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ExternalStorageConfigurationManager" enabled="true" />
+  <component name="MavenProjectsManager">
+    <option name="originalFiles">
+      <list>
+        <option value="$PROJECT_DIR$/service-utilisateurs/pom.xml" />
+        <option value="$PROJECT_DIR$/service-trajets/pom.xml" />
+        <option value="$PROJECT_DIR$/service-reservations/pom.xml" />
+        <option value="$PROJECT_DIR$/service-paiements/pom.xml" />
+        <option value="$PROJECT_DIR$/service-notification/pom.xml" />
+        <option value="$PROJECT_DIR$/api-gateway/pom.xml" />
+        <option value="$PROJECT_DIR$/eureka-server/pom.xml" />
+        <option value="$PROJECT_DIR$/config-server/pom.xml" />
+        <option value="$PROJECT_DIR$/onfig-server/pom.xml" />
+        <option value="$PROJECT_DIR$/service-voyages/pom.xml" />
+        <option value="$PROJECT_DIR$/service-avis/pom.xml" />
+      </list>
+    </option>
+    <option name="ignoredFiles">
+      <set>
+        <option value="$PROJECT_DIR$/api-gateway/pom.xml" />
+        <option value="$PROJECT_DIR$/config-server/pom.xml" />
+        <option value="$PROJECT_DIR$/eureka-server/pom.xml" />
+      </set>
+    </option>
+  </component>
+  <component name="ProjectRootManager" version="2">
+    <output url="file://$PROJECT_DIR$/out" />
+  </component>
+</project>
