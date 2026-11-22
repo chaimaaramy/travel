@@ -1,6 +1,6 @@
-
 package com.travelbook.servicereservations.controller;
 
+import com.travelbook.servicereservations.dto.ReservationDetailsDTO;
 import com.travelbook.servicereservations.dto.ReservationRequestDTO;
 import com.travelbook.servicereservations.dto.ReservationResponseDTO;
 import com.travelbook.servicereservations.service.ReservationService;
@@ -34,11 +34,27 @@ public class ReservationController {
         return reservationService.getReservationById(id);
     }
 
+    @GetMapping("/{id}/details")
+    public ReservationDetailsDTO getDetails(@PathVariable Long id) {
+        return reservationService.getDetails(id);
+    }
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public ReservationResponseDTO createReservation(
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody ReservationRequestDTO dto) {
-        return reservationService.createReservation(dto);
+        return reservationService.createReservation(dto, idempotencyKey);
+    }
+
+    @PostMapping("/{id}/confirmer")
+    public ReservationResponseDTO confirmer(@PathVariable Long id) {
+        return reservationService.confirmerReservation(id);
+    }
+
+    @PostMapping("/{id}/annuler")
+    public ReservationResponseDTO annuler(@PathVariable Long id) {
+        return reservationService.annulerReservation(id);
     }
 
     @PutMapping("/{id}")

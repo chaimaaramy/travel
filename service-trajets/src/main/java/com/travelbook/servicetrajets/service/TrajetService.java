@@ -1,5 +1,5 @@
 package com.travelbook.servicetrajets.service;
-
+import org.springframework.transaction.annotation.Transactional;
 import com.travelbook.servicetrajets.dto.TrajetRequestDTO;
 import com.travelbook.servicetrajets.dto.TrajetResponseDTO;
 import com.travelbook.servicetrajets.entity.Trajet;
@@ -75,6 +75,7 @@ public class TrajetService {
         trajet.setDateHeureArrivee(dto.dateHeureArrivee());
         trajet.setMoyenTransport(dto.moyenTransport());
         trajet.setPrix(dto.prix());
+        trajet.setPlacesRestantes(dto.placesRestantes());
     }
 
     private TrajetResponseDTO toDTO(Trajet trajet) {
@@ -86,8 +87,25 @@ public class TrajetService {
                 trajet.getDateHeureDepart(),
                 trajet.getDateHeureArrivee(),
                 trajet.getMoyenTransport(),
-                trajet.getPrix()
+                trajet.getPrix(),
+                trajet.getPlacesRestantes()
         );
+    }
+        @Transactional
+    public void reserverPlaces(Long id, int nombre) {
+        findTrajet(id);
+        int modifie = trajetRepository.reserverPlaces(id, nombre);
+        if (modifie == 0) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Pas assez de places disponibles pour le trajet " + id);
+        }
+    }
+
+    @Transactional
+    public void libererPlaces(Long id, int nombre) {
+        findTrajet(id);
+        trajetRepository.libererPlaces(id, nombre);
     }
 }
 

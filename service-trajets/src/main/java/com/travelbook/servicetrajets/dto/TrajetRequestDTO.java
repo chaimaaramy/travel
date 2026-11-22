@@ -29,7 +29,11 @@ public record TrajetRequestDTO(
 
         @NotNull
         @DecimalMin(value = "0.0", inclusive = true)
-        BigDecimal prix
+        BigDecimal prix,
+
+        @NotNull
+        @PositiveOrZero
+        Integer placesRestantes
 
 ) {
     @AssertTrue(message = "La date d'arrivee doit etre apres le depart")

@@ -41,4 +41,7 @@ public class Trajet {
 
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal prix;
+
+    @Column(nullable = false)
+    private Integer placesRestantes;
 }
