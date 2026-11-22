@@ -3,12 +3,24 @@ package com.travelbook.servicepaiements.service;
 
 import com.travelbook.servicepaiements.dto.PaiementRequestDTO;
 import com.travelbook.servicepaiements.dto.PaiementResponseDTO;
+import com.travelbook.servicepaiements.client.ReservationClient;
+import com.travelbook.servicepaiements.client.ReservationDTO;
+import com.travelbook.servicepaiements.client.UtilisateurClient;
+import com.travelbook.servicepaiements.client.UtilisateurDTO;
+import com.travelbook.servicepaiements.dto.NotificationEmailDto;
 import com.travelbook.servicepaiements.entity.Paiement;
 import com.travelbook.servicepaiements.entity.StatutPaiement;
+import com.travelbook.servicepaiements.messaging.NotificationPublisher;
 import com.travelbook.servicepaiements.repository.PaiementRepository;
 
+import feign.FeignException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
@@ -17,10 +29,21 @@ import java.util.List;
 @Service
 public class PaiementService {
 
-    private final PaiementRepository paiementRepository;
+    private static final Logger log = LoggerFactory.getLogger(PaiementService.class);
 
-    public PaiementService(PaiementRepository paiementRepository) {
+    private final PaiementRepository paiementRepository;
+    private final ReservationClient reservationClient;
+    private final UtilisateurClient utilisateurClient;
+    private final NotificationPublisher notificationPublisher;
+
+    public PaiementService(PaiementRepository paiementRepository,
+                           ReservationClient reservationClient,
+                           UtilisateurClient utilisateurClient,
+                           NotificationPublisher notificationPublisher) {
         this.paiementRepository = paiementRepository;
+        this.reservationClient = reservationClient;
+        this.utilisateurClient = utilisateurClient;
+        this.notificationPublisher = notificationPublisher;
     }
 
     public List<PaiementResponseDTO> getAllPaiements() {
@@ -34,6 +57,15 @@ public class PaiementService {
         return toDTO(findPaiement(id));
     }
 
+    public PaiementResponseDTO getPaiementByReservationId(Long reservationId) {
+        return paiementRepository.findByReservationId(reservationId)
+                .map(this::toDTO)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Paiement introuvable pour la réservation : " + reservationId
+                ));
+    }
+
     public PaiementResponseDTO createPaiement(
             PaiementRequestDTO dto) {
 
@@ -41,6 +73,27 @@ public class PaiementService {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
                     "Le paiement doit commencer EN_ATTENTE"
+            );
+        }
+
+        if (paiementRepository.findByReservationId(dto.reservationId()).isPresent()) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Un paiement existe déjà pour cette réservation"
+            );
+        }
+        ReservationDTO reservation = recupererReservation(dto.reservationId());
+        if (!"EN_ATTENTE".equals(reservation.statut())) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "La réservation doit être EN_ATTENTE pour être payée"
+            );
+        }
+        if (reservation.montant() == null
+                || reservation.montant().compareTo(dto.montant()) != 0) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Le montant ne correspond pas à celui de la réservation"
             );
         }
 
@@ -55,17 +108,44 @@ public class PaiementService {
         return toDTO(paiementRepository.save(paiement));
     }
 
+    @Transactional
     public PaiementResponseDTO updatePaiement(
             Long id, PaiementRequestDTO dto) {
 
         Paiement paiement = findPaiement(id);
 
-        paiement.setReservationId(dto.reservationId());
-        paiement.setMontant(dto.montant());
-        paiement.setModePaiement(dto.modePaiement());
-        paiement.setStatut(dto.statut());
+        if (!paiement.getReservationId().equals(dto.reservationId())) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "La réservation d'un paiement ne peut pas être modifiée"
+            );
+        }
+        if (paiement.getStatut() == dto.statut()) {
+            return toDTO(paiement);
+        }
+        if (paiement.getStatut() != StatutPaiement.EN_ATTENTE
+                || (dto.statut() != StatutPaiement.PAYE
+                && dto.statut() != StatutPaiement.REFUSE)) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Seul un paiement EN_ATTENTE peut devenir PAYE ou REFUSE"
+            );
+        }
 
-        return toDTO(paiementRepository.save(paiement));
+        ReservationDTO reservation = recupererReservation(paiement.getReservationId());
+        if (dto.statut() == StatutPaiement.PAYE) {
+            appelerReservation(() -> reservationClient.confirmerReservation(
+                    paiement.getReservationId()));
+        } else {
+            appelerReservation(() -> reservationClient.annulerReservation(
+                    paiement.getReservationId()));
+        }
+
+        paiement.setStatut(dto.statut());
+        Paiement paiementEnregistre = paiementRepository.save(paiement);
+        preparerNotificationApresCommit(paiementEnregistre, reservation);
+
+        return toDTO(paiementEnregistre);
     }
 
     public void deletePaiement(Long id) {
@@ -79,6 +159,89 @@ public class PaiementService {
                         HttpStatus.NOT_FOUND,
                         "Paiement introuvable : " + id
                 ));
+    }
+
+    private ReservationDTO recupererReservation(Long reservationId) {
+        try {
+            return reservationClient.getReservation(reservationId);
+        } catch (FeignException.NotFound e) {
+            throw new ResponseStatusException(
+                    HttpStatus.NOT_FOUND,
+                    "Réservation introuvable : " + reservationId
+            );
+        } catch (FeignException e) {
+            throw indisponible();
+        }
+    }
+
+    private void appelerReservation(Runnable appel) {
+        try {
+            appel.run();
+        } catch (FeignException.NotFound e) {
+            throw new ResponseStatusException(
+                    HttpStatus.NOT_FOUND,
+                    "Réservation introuvable"
+            );
+        } catch (FeignException.Conflict e) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "La réservation ne peut pas changer d'état"
+            );
+        } catch (FeignException e) {
+            throw indisponible();
+        }
+    }
+
+    private ResponseStatusException indisponible() {
+        return new ResponseStatusException(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "service-reservations est indisponible"
+        );
+    }
+
+    private void preparerNotificationApresCommit(
+            Paiement paiement, ReservationDTO reservation) {
+        UtilisateurDTO utilisateur;
+        try {
+            utilisateur = utilisateurClient.getUtilisateur(reservation.userId());
+        } catch (FeignException e) {
+            log.warn("Paiement {} enregistré, notification ignorée : "
+                    + "service-utilisateurs indisponible (HTTP {})",
+                    paiement.getId(), e.status());
+            return;
+        }
+
+        if (utilisateur == null || utilisateur.email() == null || utilisateur.email().isBlank()) {
+            log.warn("Paiement {} enregistré, notification ignorée : "
+                    + "l'utilisateur {} n'a pas d'adresse email",
+                    paiement.getId(), reservation.userId());
+            return;
+        }
+
+        boolean paye = paiement.getStatut() == StatutPaiement.PAYE;
+        String objet = paye ? "Paiement confirmé" : "Paiement refusé";
+        String contenu = paye
+                ? "Bonjour " + utilisateur.nom() + ", votre réservation "
+                + paiement.getReservationId() + " est confirmée. Montant : "
+                + paiement.getMontant() + "."
+                : "Bonjour " + utilisateur.nom() + ", votre paiement pour la réservation "
+                + paiement.getReservationId() + " a été refusé.";
+        NotificationEmailDto notification = new NotificationEmailDto(
+                utilisateur.email(), objet, contenu);
+
+        TransactionSynchronizationManager.registerSynchronization(
+                new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        try {
+                            notificationPublisher.envoyer(notification);
+                        } catch (org.springframework.amqp.AmqpException e) {
+                            log.error("Paiement {} enregistré, mais publication "
+                                    + "de la notification impossible",
+                                    paiement.getId(), e);
+                        }
+                    }
+                });
     }
 
     private PaiementResponseDTO toDTO(Paiement paiement) {

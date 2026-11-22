@@ -33,6 +33,12 @@ public class PaiementController {
         return paiementService.getPaiementById(id);
     }
 
+    @GetMapping("/reservation/{reservationId}")
+    public PaiementResponseDTO getPaiementByReservationId(
+            @PathVariable Long reservationId) {
+        return paiementService.getPaiementByReservationId(reservationId);
+    }
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public PaiementResponseDTO createPaiement(

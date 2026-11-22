@@ -22,7 +22,7 @@ public class Paiement {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @Column(nullable = false, unique = true)
     private Long reservationId;
 
     @Column(nullable = false, precision = 10, scale = 2)

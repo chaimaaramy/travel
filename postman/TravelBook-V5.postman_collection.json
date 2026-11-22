@@ -1,0 +1,142 @@
+{
+  "info": {
+    "_postman_id": "5b2dd9d7-3cab-4517-a360-0acc4a88f601",
+    "name": "Travel Book - V5 RabbitMQ notifications",
+    "description": "Smoke tests for the local Mailpit endpoint and the payment-to-email RabbitMQ flow. Start Mailpit, RabbitMQ, Config Server, Eureka, and the required Travel services first.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "notificationUrl",
+      "value": "http://localhost:8084"
+    },
+    {
+      "key": "gatewayUrl",
+      "value": "http://localhost:8085"
+    },
+    {
+      "key": "recipient",
+      "value": "traveler@example.com"
+    },
+    {
+      "key": "reservationId",
+      "value": "1"
+    },
+    {
+      "key": "paymentId",
+      "value": "1"
+    },
+    {
+      "key": "amount",
+      "value": "75.00"
+    }
+  ],
+  "item": [
+    {
+      "name": "SMTP direct test - success",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"destinataire\": \"{{recipient}}\",\n  \"objet\": \"Test Travel Book\",\n  \"contenu\": \"Email de vérification via Mailpit.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{notificationUrl}}/notifications/email"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('SMTP accepts the email', function () {",
+              "  pm.response.to.have.status(204);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "SMTP direct test - invalid email",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"destinataire\": \"adresse-invalide\",\n  \"objet\": \"Test invalide\",\n  \"contenu\": \"Ce message ne doit pas être envoyé.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{notificationUrl}}/notifications/email"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Invalid email is rejected', function () {",
+              "  pm.response.to.have.status(400);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payment status triggers an email asynchronously",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"reservationId\": {{reservationId}},\n  \"montant\": {{amount}},\n  \"modePaiement\": \"CARTE_BANCAIRE\",\n  \"statut\": \"PAYE\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{gatewayUrl}}/api/paiements/{{paymentId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Payment update succeeds', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().statut).to.eql('PAYE');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
