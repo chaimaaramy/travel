@@ -1,10 +1,10 @@
-package com.travelbook.onfigserver;
+package com.travelbook.configserver;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class OnfigServerApplicationTests {
+class ConfigServerApplicationTests {
 
     @Test
     void contextLoads() {
