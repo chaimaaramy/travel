@@ -21,6 +21,20 @@ public class TrajetController {
         this.trajetService = trajetService;
     }
 
+        @PostMapping("/{id}/reserver-places")
+    public ResponseEntity<Void> reserverPlaces(
+            @PathVariable Long id, @RequestParam int nombre) {
+        trajetService.reserverPlaces(id, nombre);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/{id}/liberer-places")
+    public ResponseEntity<Void> libererPlaces(
+            @PathVariable Long id, @RequestParam int nombre) {
+        trajetService.libererPlaces(id, nombre);
+        return ResponseEntity.noContent().build();
+    }
+    
     @GetMapping
     public List<TrajetResponseDTO> getAllTrajets() {
         return trajetService.getAllTrajets();

@@ -15,6 +15,7 @@ public record TrajetResponseDTO(
         LocalDateTime dateHeureDepart,
         LocalDateTime dateHeureArrivee,
         MoyenTransport moyenTransport,
-        BigDecimal prix
+        BigDecimal prix,
+        Integer placesRestantes
 ) {
 }

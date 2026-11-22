@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import java.math.BigDecimal;
 
 import java.time.LocalDateTime;
 
@@ -36,4 +37,10 @@ public class Reservation {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private StatutReservation statut;
+
+    @Column(unique = true)
+    private String idempotencyKey;
+
+    @Column(precision = 10, scale = 2)
+    private BigDecimal montant;
 }
