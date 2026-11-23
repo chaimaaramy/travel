@@ -9,6 +9,8 @@ import com.travelbook.servicereservations.entity.Reservation;
 import com.travelbook.servicereservations.entity.StatutReservation;
 import com.travelbook.servicereservations.repository.ReservationRepository;
 import com.travelbook.servicereservations.repository.TicketRepository;
+import com.travelbook.servicereservations.resilience.ResilientRequests;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -20,10 +22,13 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -47,8 +52,21 @@ class ReservationServiceTest {
     @Mock
     private PaiementClient paiementClient;
 
+    @Mock
+    private ResilientRequests resilientRequests;
+
     @InjectMocks
     private ReservationService reservationService;
+
+    @BeforeEach
+    void executerLesAppelsDistantDirectement() {
+        lenient().when(resilientRequests.lectureOptionnelle(anyString(), any()))
+                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
+        lenient().when(resilientRequests.lectureObligatoire(anyString(), any()))
+                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
+        lenient().when(resilientRequests.ecritureObligatoire(anyString(), any()))
+                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
+    }
 
     @Test
     void createsReservationAfterVerifyingUserAndReservingSeats() {

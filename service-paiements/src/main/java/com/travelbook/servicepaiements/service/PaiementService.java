@@ -7,11 +7,12 @@ import com.travelbook.servicepaiements.client.ReservationClient;
 import com.travelbook.servicepaiements.client.ReservationDTO;
 import com.travelbook.servicepaiements.client.UtilisateurClient;
 import com.travelbook.servicepaiements.client.UtilisateurDTO;
-import com.travelbook.servicepaiements.dto.NotificationEmailDto;
 import com.travelbook.servicepaiements.entity.Paiement;
 import com.travelbook.servicepaiements.entity.StatutPaiement;
+import com.travelbook.servicepaiements.messaging.NotificationEmailRequestedEvent;
 import com.travelbook.servicepaiements.messaging.NotificationPublisher;
 import com.travelbook.servicepaiements.repository.PaiementRepository;
+import com.travelbook.servicepaiements.resilience.ResilientRequests;
 
 import feign.FeignException;
 import org.slf4j.Logger;
@@ -25,6 +26,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
+import java.util.function.Supplier;
 
 @Service
 public class PaiementService {
@@ -35,15 +38,18 @@ public class PaiementService {
     private final ReservationClient reservationClient;
     private final UtilisateurClient utilisateurClient;
     private final NotificationPublisher notificationPublisher;
+    private final ResilientRequests resilientRequests;
 
     public PaiementService(PaiementRepository paiementRepository,
                            ReservationClient reservationClient,
                            UtilisateurClient utilisateurClient,
-                           NotificationPublisher notificationPublisher) {
+                           NotificationPublisher notificationPublisher,
+                           ResilientRequests resilientRequests) {
         this.paiementRepository = paiementRepository;
         this.reservationClient = reservationClient;
         this.utilisateurClient = utilisateurClient;
         this.notificationPublisher = notificationPublisher;
+        this.resilientRequests = resilientRequests;
     }
 
     public List<PaiementResponseDTO> getAllPaiements() {
@@ -163,7 +169,8 @@ public class PaiementService {
 
     private ReservationDTO recupererReservation(Long reservationId) {
         try {
-            return reservationClient.getReservation(reservationId);
+            return resilientRequests.lectureObligatoire("service-reservations",
+                    () -> reservationClient.getReservation(reservationId));
         } catch (FeignException.NotFound e) {
             throw new ResponseStatusException(
                     HttpStatus.NOT_FOUND,
@@ -174,9 +181,9 @@ public class PaiementService {
         }
     }
 
-    private void appelerReservation(Runnable appel) {
+    private void appelerReservation(Supplier<ReservationDTO> appel) {
         try {
-            appel.run();
+            resilientRequests.ecritureObligatoire("service-reservations", appel);
         } catch (FeignException.NotFound e) {
             throw new ResponseStatusException(
                     HttpStatus.NOT_FOUND,
@@ -201,17 +208,17 @@ public class PaiementService {
 
     private void preparerNotificationApresCommit(
             Paiement paiement, ReservationDTO reservation) {
-        UtilisateurDTO utilisateur;
-        try {
-            utilisateur = utilisateurClient.getUtilisateur(reservation.userId());
-        } catch (FeignException e) {
+        UtilisateurDTO utilisateur = resilientRequests.lectureOptionnelle(
+                "service-utilisateurs",
+                () -> utilisateurClient.getUtilisateur(reservation.userId()));
+        if (utilisateur == null) {
             log.warn("Paiement {} enregistré, notification ignorée : "
-                    + "service-utilisateurs indisponible (HTTP {})",
-                    paiement.getId(), e.status());
+                    + "service-utilisateurs indisponible ou utilisateur introuvable",
+                    paiement.getId());
             return;
         }
 
-        if (utilisateur == null || utilisateur.email() == null || utilisateur.email().isBlank()) {
+        if (utilisateur.email() == null || utilisateur.email().isBlank()) {
             log.warn("Paiement {} enregistré, notification ignorée : "
                     + "l'utilisateur {} n'a pas d'adresse email",
                     paiement.getId(), reservation.userId());
@@ -226,7 +233,11 @@ public class PaiementService {
                 + paiement.getMontant() + "."
                 : "Bonjour " + utilisateur.nom() + ", votre paiement pour la réservation "
                 + paiement.getReservationId() + " a été refusé.";
-        NotificationEmailDto notification = new NotificationEmailDto(
+        NotificationEmailRequestedEvent event = new NotificationEmailRequestedEvent(
+                UUID.randomUUID(),
+                NotificationEmailRequestedEvent.CURRENT_VERSION,
+                paiement.getId(),
+                paiement.getReservationId(),
                 utilisateur.email(), objet, contenu);
 
         TransactionSynchronizationManager.registerSynchronization(
@@ -234,8 +245,8 @@ public class PaiementService {
                     @Override
                     public void afterCommit() {
                         try {
-                            notificationPublisher.envoyer(notification);
-                        } catch (org.springframework.amqp.AmqpException e) {
+                            notificationPublisher.envoyer(event);
+                        } catch (Exception e) {
                             log.error("Paiement {} enregistré, mais publication "
                                     + "de la notification impossible",
                                     paiement.getId(), e);

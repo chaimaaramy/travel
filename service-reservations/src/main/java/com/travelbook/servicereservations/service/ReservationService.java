@@ -4,8 +4,11 @@ import com.travelbook.servicereservations.client.*;
 import com.travelbook.servicereservations.dto.*;
 import com.travelbook.servicereservations.entity.*;
 import com.travelbook.servicereservations.repository.*;
+import com.travelbook.servicereservations.resilience.ResilientRequests;
 
 import feign.FeignException;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,7 +19,6 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 @Service
 public class ReservationService {
@@ -26,17 +28,20 @@ public class ReservationService {
     private final UtilisateurClient utilisateurClient;
     private final TrajetClient trajetClient;
     private final PaiementClient paiementClient;
+    private final ResilientRequests resilientRequests;
 
     public ReservationService(ReservationRepository reservationRepository,
                               TicketRepository ticketRepository,
                               UtilisateurClient utilisateurClient,
                               TrajetClient trajetClient,
-                              PaiementClient paiementClient) {
+                              PaiementClient paiementClient,
+                              ResilientRequests resilientRequests) {
         this.reservationRepository = reservationRepository;
         this.ticketRepository = ticketRepository;
         this.utilisateurClient = utilisateurClient;
         this.trajetClient = trajetClient;
         this.paiementClient = paiementClient;
+        this.resilientRequests = resilientRequests;
     }
 
     public List<ReservationResponseDTO> getAllReservations() {
@@ -92,6 +97,7 @@ public class ReservationService {
 
     // ---------- Confirmation (appelée par service-paiements) : émet les billets ----------
     @Transactional
+    @CacheEvict(cacheNames = "reservationDetails", key = "#id")
     public ReservationResponseDTO confirmerReservation(Long id) {
         Reservation reservation = findReservation(id);
 
@@ -118,6 +124,7 @@ public class ReservationService {
     }
 
     // ---------- Annulation (compensation) : libère les places ----------
+    @CacheEvict(cacheNames = "reservationDetails", key = "#id")
     public ReservationResponseDTO annulerReservation(Long id) {
         Reservation reservation = findReservation(id);
 
@@ -130,18 +137,24 @@ public class ReservationService {
     }
 
     // ---------- Consultation enrichie ----------
+    @Cacheable(cacheNames = "reservationDetails", key = "#id",
+            unless = "#result == null or #result.utilisateur() == null or #result.trajet() == null")
     public ReservationDetailsDTO getDetails(Long id) {
         Reservation reservation = findReservation(id);
 
         return new ReservationDetailsDTO(
                 toDTO(reservation),
-                optionnel(() -> utilisateurClient.getUser(reservation.getUserId())),
-                optionnel(() -> trajetClient.getTrajet(reservation.getVoyageId())),
+                resilientRequests.lectureOptionnelle("service-utilisateurs",
+                        () -> utilisateurClient.getUser(reservation.getUserId())),
+                resilientRequests.lectureOptionnelle("service-trajets",
+                        () -> trajetClient.getTrajet(reservation.getVoyageId())),
                 ticketRepository.findByReservationId(id),
-                optionnel(() -> paiementClient.getPaiementParReservation(id))
+                resilientRequests.lectureOptionnelle("service-paiements",
+                        () -> paiementClient.getPaiementParReservation(id))
         );
     }
 
+    @CacheEvict(cacheNames = "reservationDetails", key = "#id")
     public ReservationResponseDTO updateReservation(
             Long id, ReservationRequestDTO dto) {
         Reservation reservation = findReservation(id);
@@ -152,6 +165,7 @@ public class ReservationService {
         return toDTO(reservationRepository.save(reservation));
     }
 
+    @CacheEvict(cacheNames = "reservationDetails", key = "#id")
     public void deleteReservation(Long id) {
         reservationRepository.delete(findReservation(id));
     }
@@ -159,7 +173,8 @@ public class ReservationService {
     // ---------- Appels distants et gestion des erreurs ----------
     private void verifierUtilisateur(Long userId) {
         try {
-            utilisateurClient.getUser(userId);
+            resilientRequests.lectureObligatoire("service-utilisateurs",
+                    () -> utilisateurClient.getUser(userId));
         } catch (FeignException.NotFound e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
                     "Utilisateur introuvable : " + userId);
@@ -170,7 +185,8 @@ public class ReservationService {
 
     private TrajetDTO recupererTrajet(Long trajetId) {
         try {
-            return trajetClient.getTrajet(trajetId);
+            return resilientRequests.lectureObligatoire("service-trajets",
+                    () -> trajetClient.getTrajet(trajetId));
         } catch (FeignException.NotFound e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
                     "Trajet introuvable : " + trajetId);
@@ -181,7 +197,10 @@ public class ReservationService {
 
     private void reserverPlaces(Long trajetId, int nombre) {
         try {
-            trajetClient.reserverPlaces(trajetId, nombre);
+            resilientRequests.ecritureObligatoire("service-trajets", () -> {
+                trajetClient.reserverPlaces(trajetId, nombre);
+                return null;
+            });
         } catch (FeignException.Conflict e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Pas assez de places disponibles");
@@ -195,7 +214,10 @@ public class ReservationService {
 
     private void libererPlaces(Long trajetId, int nombre) {
         try {
-            trajetClient.libererPlaces(trajetId, nombre);
+            resilientRequests.ecritureObligatoire("service-trajets", () -> {
+                trajetClient.libererPlaces(trajetId, nombre);
+                return null;
+            });
         } catch (FeignException e) {
             throw indisponible("service-trajets");
         }
@@ -204,14 +226,6 @@ public class ReservationService {
     private ResponseStatusException indisponible(String service) {
         return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                 service + " est indisponible");
-    }
-
-    private <T> T optionnel(Supplier<T> appel) {
-        try {
-            return appel.get();
-        } catch (FeignException e) {
-            return null;
-        }
     }
 
     private Reservation findReservation(Long id) {

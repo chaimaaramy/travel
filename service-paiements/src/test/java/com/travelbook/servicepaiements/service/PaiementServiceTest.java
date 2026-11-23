@@ -4,13 +4,14 @@ import com.travelbook.servicepaiements.client.ReservationClient;
 import com.travelbook.servicepaiements.client.ReservationDTO;
 import com.travelbook.servicepaiements.client.UtilisateurClient;
 import com.travelbook.servicepaiements.client.UtilisateurDTO;
-import com.travelbook.servicepaiements.dto.NotificationEmailDto;
 import com.travelbook.servicepaiements.dto.PaiementRequestDTO;
 import com.travelbook.servicepaiements.entity.ModePaiement;
 import com.travelbook.servicepaiements.entity.Paiement;
 import com.travelbook.servicepaiements.entity.StatutPaiement;
+import com.travelbook.servicepaiements.messaging.NotificationEmailRequestedEvent;
 import com.travelbook.servicepaiements.messaging.NotificationPublisher;
 import com.travelbook.servicepaiements.repository.PaiementRepository;
+import com.travelbook.servicepaiements.resilience.ResilientRequests;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,18 +20,21 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.amqp.AmqpException;
+import org.springframework.kafka.KafkaException;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -50,12 +54,21 @@ class PaiementServiceTest {
     @Mock
     private NotificationPublisher notificationPublisher;
 
+    @Mock
+    private ResilientRequests resilientRequests;
+
     @InjectMocks
     private PaiementService paiementService;
 
     @BeforeEach
     void startTransactionSynchronization() {
         TransactionSynchronizationManager.initSynchronization();
+        lenient().when(resilientRequests.lectureOptionnelle(anyString(), any()))
+                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
+        lenient().when(resilientRequests.lectureObligatoire(anyString(), any()))
+                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
+        lenient().when(resilientRequests.ecritureObligatoire(anyString(), any()))
+                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
     }
 
     @AfterEach
@@ -121,15 +134,19 @@ class PaiementServiceTest {
 
         assertEquals(StatutPaiement.PAYE, result.statut());
         verify(reservationClient).confirmerReservation(12L);
-        verify(notificationPublisher, never()).envoyer(any(NotificationEmailDto.class));
+        verify(notificationPublisher, never()).envoyer(any(NotificationEmailRequestedEvent.class));
 
         runAfterCommit();
 
-        ArgumentCaptor<NotificationEmailDto> email =
-                ArgumentCaptor.forClass(NotificationEmailDto.class);
+        ArgumentCaptor<NotificationEmailRequestedEvent> email =
+                ArgumentCaptor.forClass(NotificationEmailRequestedEvent.class);
         verify(notificationPublisher).envoyer(email.capture());
         assertEquals("test@example.com", email.getValue().destinataire());
         assertEquals("Paiement confirmé", email.getValue().objet());
+        assertEquals(4L, email.getValue().paiementId());
+        assertEquals(12L, email.getValue().reservationId());
+        assertEquals(1, email.getValue().eventVersion());
+        org.junit.jupiter.api.Assertions.assertNotNull(email.getValue().eventId());
         org.junit.jupiter.api.Assertions.assertTrue(
                 email.getValue().contenu().contains("réservation 12 est confirmée"));
     }
@@ -152,8 +169,8 @@ class PaiementServiceTest {
         verify(reservationClient).annulerReservation(12L);
         runAfterCommit();
 
-        ArgumentCaptor<NotificationEmailDto> email =
-                ArgumentCaptor.forClass(NotificationEmailDto.class);
+        ArgumentCaptor<NotificationEmailRequestedEvent> email =
+                ArgumentCaptor.forClass(NotificationEmailRequestedEvent.class);
         verify(notificationPublisher).envoyer(email.capture());
         assertEquals("Paiement refusé", email.getValue().objet());
         org.junit.jupiter.api.Assertions.assertTrue(
@@ -171,8 +188,8 @@ class PaiementServiceTest {
         when(utilisateurClient.getUtilisateur(8L)).thenReturn(new UtilisateurDTO(
                 8L, "Utilisateur test", "test@example.com", "CLIENT", true));
         when(paiementRepository.save(paiement)).thenReturn(paiement);
-        doThrow(new AmqpException("Broker indisponible"))
-                .when(notificationPublisher).envoyer(any(NotificationEmailDto.class));
+        doThrow(new KafkaException("Broker indisponible"))
+                .when(notificationPublisher).envoyer(any(NotificationEmailRequestedEvent.class));
 
         var result = paiementService.updatePaiement(4L, request(
                 12L, "75.00", StatutPaiement.PAYE));

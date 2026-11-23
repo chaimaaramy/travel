@@ -4,6 +4,7 @@ import com.travelbook.servicereservations.dto.ReservationDetailsDTO;
 import com.travelbook.servicereservations.dto.ReservationRequestDTO;
 import com.travelbook.servicereservations.dto.ReservationResponseDTO;
 import com.travelbook.servicereservations.service.ReservationService;
+import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -35,6 +36,7 @@ public class ReservationController {
     }
 
     @GetMapping("/{id}/details")
+    @RateLimiter(name = "reservationDetails")
     public ReservationDetailsDTO getDetails(@PathVariable Long id) {
         return reservationService.getDetails(id);
     }
