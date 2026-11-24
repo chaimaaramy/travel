@@ -1,6 +1,7 @@
 
 package com.travelbook.servicepaiements.service;
 
+import com.travelbook.servicepaiements.dto.NotificationEmailDto;
 import com.travelbook.servicepaiements.dto.PaiementRequestDTO;
 import com.travelbook.servicepaiements.dto.PaiementResponseDTO;
 import com.travelbook.servicepaiements.client.ReservationClient;
@@ -9,7 +10,6 @@ import com.travelbook.servicepaiements.client.UtilisateurClient;
 import com.travelbook.servicepaiements.client.UtilisateurDTO;
 import com.travelbook.servicepaiements.entity.Paiement;
 import com.travelbook.servicepaiements.entity.StatutPaiement;
-import com.travelbook.servicepaiements.messaging.NotificationEmailRequestedEvent;
 import com.travelbook.servicepaiements.messaging.NotificationPublisher;
 import com.travelbook.servicepaiements.repository.PaiementRepository;
 import com.travelbook.servicepaiements.resilience.ResilientRequests;
@@ -26,7 +26,6 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.UUID;
 import java.util.function.Supplier;
 
 @Service
@@ -233,11 +232,7 @@ public class PaiementService {
                 + paiement.getMontant() + "."
                 : "Bonjour " + utilisateur.nom() + ", votre paiement pour la réservation "
                 + paiement.getReservationId() + " a été refusé.";
-        NotificationEmailRequestedEvent event = new NotificationEmailRequestedEvent(
-                UUID.randomUUID(),
-                NotificationEmailRequestedEvent.CURRENT_VERSION,
-                paiement.getId(),
-                paiement.getReservationId(),
+        NotificationEmailDto notification = new NotificationEmailDto(
                 utilisateur.email(), objet, contenu);
 
         TransactionSynchronizationManager.registerSynchronization(
@@ -245,8 +240,8 @@ public class PaiementService {
                     @Override
                     public void afterCommit() {
                         try {
-                            notificationPublisher.envoyer(event);
-                        } catch (Exception e) {
+                            notificationPublisher.envoyer(notification);
+                        } catch (org.springframework.amqp.AmqpException e) {
                             log.error("Paiement {} enregistré, mais publication "
                                     + "de la notification impossible",
                                     paiement.getId(), e);
